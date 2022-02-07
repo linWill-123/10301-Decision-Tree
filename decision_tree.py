@@ -129,16 +129,38 @@ def getConditionalEntropy(dataXm, dataLabels):
                 y1_x0 += 1
             else: # x == x1
                 y1_x1 += 1
-    x0_count = float(y0_x0 + y1_x0)
-    x1_count = float(y0_x1 + y1_x1)
+    # calc prob x0, x1 respectively
+    x0Count = y0_x0 + y1_x0
+    x1Count = y0_x1 + y1_x1
+    #can be 0 since col may not contain x0 attr
+    prob_x0 = x0Count/float(x0Count + x1Count) 
+    #can be 0 since col may not contain x1 attr
+    prob_x1 = x1Count/float(x0Count + x1Count)
 
-    prob_x0 = x0_count/ (x0_count + x1_count)
-    prob_x1 = x1_count/ (x0_count + x1_count)
-    if (prob_x0 == 0 or prob_x1 == 0): return 0 # pure data set occurance
-    prob_y0_x0 = y0_x0/x0_count
-    prob_y1_x0 = y1_x0/x0_count
-    prob_y0_x1 = y0_x1/x1_count
-    prob_y1_x1 = y1_x1/x1_count
+    allCount_Y_X0 = float(y0_x0 + y1_x0)    
+    allCount_Y_X1 = float(y0_x1 + y1_x1)
+    # # need to make sure entropy is not pure: so if either of the count is 0,
+    # # that means data only contains one label, then we have pure data set
+    # if allCount_Y_X0 == 0 or allCount_Y_X1 == 0: 
+    #     return 0 # also means no dependent relation between Values of Y and varied value of X 
+
+    # Calc y = y0 | x = x0 ;  y = y1 | x = 0  ;  y = y0 | x = x1  ; y = y1 | x= x1
+    # probability of y=0 | x = 0  -> y = 0 | x = 0 / all y | x = 0
+    prob_y0_x0 = 0
+    if allCount_Y_X0 > 0:
+        prob_y0_x0 = y0_x0 / allCount_Y_X0
+    # probability of y=1 | x = 0  -> y = 1 | x = 0 / all y | x = 0
+    prob_y1_x0 = 0
+    if allCount_Y_X0 > 0:
+        prob_y1_x0 = y1_x0 / allCount_Y_X0
+    # probability of y=0 | x = 0  -> y = 0 | x = 0 / all y | x = 0
+    prob_y0_x1 = 0
+    if allCount_Y_X1 > 0:
+        prob_y0_x1 = y0_x1 / allCount_Y_X1
+    # probability of y=1 | x = 0  -> y = 1 | x = 0 / all y | x = 0
+    prob_y1_x1 = 0
+    if allCount_Y_X1 > 0:
+        prob_y1_x1 = y1_x1 / allCount_Y_X1
 
     entropy_y_x0 = 0
     # if sub-dataset y0 given x0 or y1 given x0 is not pure
@@ -158,9 +180,10 @@ def getConditionalEntropy(dataXm, dataLabels):
     
 def getMutualInfo(dataXm, dataLabels):
     Hy = getEntropy(dataLabels)
+    print("Hy: ", Hy)
     if Hy == 0: return 0 # check if labels are pure
     Hy_x = getConditionalEntropy(dataXm, dataLabels)
-    if Hy_x == 0: return 0 # check if attributes of features are pure
+    print("Hy_x: ", Hy_x)
     return Hy - Hy_x
     
 def mutual_info_split(D, headers):
@@ -168,6 +191,7 @@ def mutual_info_split(D, headers):
     maxMI_feature = ''
     labels = D[:, -1]
     for i, feature in enumerate(headers[:-1]):
+        print("iteration #" + str(i))
         colAtFeature = D[:, i]
         MI = getMutualInfo(colAtFeature, labels)
         if MI > maxMI: 
@@ -212,16 +236,12 @@ def train(D, headers, maxDepth):
         p.dataSet = D
         # figure out best splitting feature and its mutual information 
         MI_val, XmToSplit = mutual_info_split(D, headers)
-        # print(XmToSplit)
-        # print(D)
-        # print(D.shape)
         # check if non-empty dataset, max depth reached, and mutual info > 0
         if (dataEmpty(D) or isMaxDepth(p, maxDepth) or 
             invalidMutualInfo(MI_val)):
             p.type = 'leaf'
             p.vote = majorityVote(D)
             return p
-
         p.type = 'internal'
         p.attr = XmToSplit # Best feature to Split
         p.depth = curDepth
@@ -233,33 +253,26 @@ def train(D, headers, maxDepth):
         # sort keys to make sure one binary key alwys stays in one side of tree
         binaryKeys = sorted(list(splittedDataTable.keys())) 
         val_xm_0, D_Xm_Val0 = binaryKeys[0], splittedDataTable[binaryKeys[0]]
-
         if len(binaryKeys) == 2: #if set only contains two binary values
             val_xm_1, D_Xm_Val1 = binaryKeys[1], splittedDataTable[binaryKeys[1]]
         else: # if set only contains one binary value
             val_xm_1, D_Xm_Val1 = '', np.empty((1,1))
-
+        print("feature: " + XmToSplit)
+        print("MI: ", MI_val)
+        print("original: ", D)
+        print("specific: ", D[:, getFeatureIndex(XmToSplit, headers)])
+        print("left split: ", D_Xm_Val0)
+        print("right split: ", D_Xm_Val1)
         # recursively build tree
         p.left = train_recursive(np.array(D_Xm_Val0), curDepth + 1, XmToSplit)
+        # print("Xm0 subset: ", D_Xm_Val0)
+        # print("Xm1 subset: ", D_Xm_Val1)
         p.right = train_recursive(np.array(D_Xm_Val1), curDepth + 1, XmToSplit)
 
         # let left, right branch take on binary values possible at feature
         p.branches = dict()
         p.branches[val_xm_0] = p.left
         p.branches[val_xm_1] = p.right
-
-        # reduce tree depth if both leaf nodes have the same vote
-        # if (p.left.type == 'leaf' and p.right.type == 'leaf' and
-        #     p.left.vote == p.right.vote):
-        #     print(p)
-        #     # set current node to leaf node with the vote
-        #     p.type = 'leaf'
-        #     p.attr = None
-        #     p.vote = p.left.vote
-        #     p.left = None
-        #     p.right = None
-        #     p.branches = None
-        #     return p
 
         return p
 
